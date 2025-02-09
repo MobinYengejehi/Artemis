@@ -66,6 +66,7 @@ public class ComputerDetails {
     public AddressTuple localAddress;
     public AddressTuple remoteAddress;
     public AddressTuple manualAddress;
+    public AddressTuple cloudgameAddress;
     public AddressTuple ipv6Address;
     public String macAddress;
     public X509Certificate serverCert;
@@ -76,6 +77,7 @@ public class ComputerDetails {
     public AddressTuple activeAddress;
     public int httpsPort;
     public int externalPort;
+    public int cloudgamePort;
     public PairingManager.PairState pairState;
     public int runningGameId;
     public String rawAppList;
@@ -140,6 +142,9 @@ public class ComputerDetails {
             // port to the current remote address. We may have tried to guess it previously.
             this.remoteAddress.port = details.externalPort;
         }
+        if (details.cloudgameAddress != null) {
+            this.cloudgameAddress = details.cloudgameAddress;
+        }
         if (details.manualAddress != null) {
             this.manualAddress = details.manualAddress;
         }
@@ -154,6 +159,7 @@ public class ComputerDetails {
         }
         this.externalPort = details.externalPort;
         this.httpsPort = details.httpsPort;
+        this.cloudgamePort = details.cloudgamePort;
         this.pairState = details.pairState;
         this.runningGameId = details.runningGameId;
         this.nvidiaServer = details.nvidiaServer;
@@ -163,6 +169,10 @@ public class ComputerDetails {
         this.vDisplaySupported = details.vDisplaySupported;
 
         this.serverCommands = details.serverCommands;
+    }
+
+    public boolean HasCloudgameService() {
+        return this.cloudgamePort != 0;
     }
 
     @NonNull
@@ -226,11 +236,13 @@ public class ComputerDetails {
                 "\nPermissions: " + permissionsStr + "\n" +
                 "Local Address: " + localAddress + "\n" +
                 "Remote Address: " + remoteAddress + "\n" +
+                "Cloudgame Address: " + cloudgameAddress + "\n" +
                 "IPv6 Address: " + ipv6Address + "\n" +
                 "Manual Address: " + manualAddress + "\n" +
                 "MAC Address: " + macAddress + "\n" +
                 "Pair State: " + pairState + "\n" +
                 "Running Game ID: " + runningGameId + "\n" +
-                "HTTPS Port: " + httpsPort + "\n";
+                "HTTPS Port: " + httpsPort + "\n" +
+                "Cloudgame Port: " + cloudgamePort + "\n";
     }
 }
