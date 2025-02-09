@@ -79,6 +79,11 @@ public class PcGridAdapter extends GenericGridAdapter<PcView.ComputerObject> {
             overlayView.setAlpha(0.4f);
             overlayView.setVisibility(View.VISIBLE);
         }
+        else if (obj.details.HasCloudgameService()) {
+            overlayView.setImageResource(R.drawable.cloudgame_icon);
+            overlayView.setAlpha(1.0f);
+            overlayView.setVisibility(View.VISIBLE);
+        }
         // We must check if the status is exactly online and unpaired
         // to avoid colliding with the loading spinner when status is unknown
         else if (obj.details.state == ComputerDetails.State.ONLINE &&
