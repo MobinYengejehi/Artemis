@@ -68,6 +68,7 @@ public class NvHTTP {
 
     private static final int DEFAULT_HTTPS_PORT = 47984;
     public static final int DEFAULT_HTTP_PORT = 47989;
+    public static final int DEFAULT_CLOUDGAME_HTTP_PORT = 47986;
     public static final int SHORT_CONNECTION_TIMEOUT = 3000;
     public static final int LONG_CONNECTION_TIMEOUT = 5000;
     public static final int READ_TIMEOUT = 7000;
@@ -419,6 +420,7 @@ public class NvHTTP {
         }
 
         details.httpsPort = getHttpsPort(serverInfo);
+        details.cloudgamePort = getCloudgameServiceHttpPort(serverInfo);
 
         details.macAddress = getXmlString(serverInfo, "mac", false);
 
@@ -428,6 +430,12 @@ public class NvHTTP {
         // This is missing on on recent GFE versions, but it's present on Sunshine
         details.externalPort = getExternalPort(serverInfo);
         details.remoteAddress = makeTuple(getXmlString(serverInfo, "ExternalIP", false), details.externalPort);
+
+        if (details.HasCloudgameService()) {
+            details.cloudgameAddress = makeTuple(getXmlString(serverInfo, "LocalIP", false), details.cloudgamePort);
+        }
+
+        boolean tst = details.HasCloudgameService();
 
         details.vDisplaySupported = getServerSupportsVDisplay(serverInfo);
         if (details.vDisplaySupported) {
@@ -653,6 +661,18 @@ public class NvHTTP {
         } catch (IOException e) {
             e.printStackTrace();
             return DEFAULT_HTTPS_PORT;
+        }
+    }
+
+    public int getCloudgameServiceHttpPort(String serverInfo) {
+        try {
+            return Integer.parseInt(getXmlString(serverInfo, "CloudgamePort", true));
+        } catch (XmlPullParserException e) {
+            e.printStackTrace();
+            return 0;
+        } catch (IOException e) {
+            e.printStackTrace();
+            return 0;
         }
     }
 
