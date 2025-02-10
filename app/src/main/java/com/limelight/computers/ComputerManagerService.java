@@ -17,6 +17,7 @@ import com.limelight.LimeLog;
 import com.limelight.binding.PlatformBinding;
 import com.limelight.discovery.DiscoveryService;
 import com.limelight.nvstream.NvConnection;
+import com.limelight.nvstream.http.CloudgameService;
 import com.limelight.nvstream.http.ComputerDetails;
 import com.limelight.nvstream.http.NvApp;
 import com.limelight.nvstream.http.NvHTTP;
@@ -552,10 +553,25 @@ public class ComputerManagerService extends Service {
             NvHTTP http = new NvHTTP(address, portMatchesActiveAddress ? details.httpsPort : 0, idManager.getUniqueId(), details.serverCert,
                     PlatformBinding.getCryptoProvider(ComputerManagerService.this));
 
+            CloudgameService service = null;
+            boolean          canServeCloudgame = details.state == ComputerDetails.State.ONLINE && !details.cloudgameJWTToken.isEmpty();
+
+            if (canServeCloudgame) {
+                service = new CloudgameService(details.cloudgameAddress, details.cloudgameJWTToken);
+            }
+
             // If this PC is currently online at this address, extend the timeouts to allow more time for the PC to respond.
             boolean isLikelyOnline = details.state == ComputerDetails.State.ONLINE && address.equals(details.activeAddress);
 
-            ComputerDetails newDetails = http.getComputerDetails(isLikelyOnline);
+            ComputerDetails newDetails;
+
+            if (service != null && details.HasCloudgameService()) {
+                newDetails = new ComputerDetails();
+
+                service.UpdateComputerDetails(newDetails);
+            } else {
+                newDetails = http.getComputerDetails(isLikelyOnline);
+            }
 
             // Check if this is the PC we expected
             if (newDetails.uuid == null) {
@@ -870,21 +886,25 @@ public class ComputerManagerService extends Service {
                             NvHTTP http = new NvHTTP(ServerHelper.getCurrentAddressFromComputer(computer), computer.httpsPort, idManager.getUniqueId(),
                                     computer.serverCert, PlatformBinding.getCryptoProvider(ComputerManagerService.this));
 
+                            CloudgameService service = new CloudgameService(computer.cloudgameAddress, computer.cloudgameJWTToken);
+
+                            boolean hasCloudgameService = computer.HasCloudgameService() && service.IsServiceValid();
+
                             String appList;
                             if (tuple != null) {
                                 // If we're polling this machine too, grab the network lock
                                 // while doing the app list request to prevent other requests
                                 // from being issued in the meantime.
                                 synchronized (tuple.networkLock) {
-                                    appList = http.getAppListRaw();
+                                    appList = hasCloudgameService ? service.GetAppListRaw() : http.getAppListRaw();
                                 }
                             }
                             else {
                                 // No polling is happening now, so we just call it directly
-                                appList = http.getAppListRaw();
+                                appList = hasCloudgameService ? service.GetAppListRaw() : http.getAppListRaw();
                             }
 
-                            List<NvApp> list = NvHTTP.getAppListByReader(new StringReader(appList));
+                            List<NvApp> list = hasCloudgameService ? CloudgameService.GetAppListByReader(new StringReader(appList)) : NvHTTP.getAppListByReader(new StringReader(appList));
                             if (list.isEmpty()) {
                                 LimeLog.warning("Empty app list received from "+computer.uuid);
 

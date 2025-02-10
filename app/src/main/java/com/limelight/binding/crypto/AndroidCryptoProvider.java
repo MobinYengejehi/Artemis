@@ -55,6 +55,11 @@ public class AndroidCryptoProvider implements LimelightCryptoProvider {
 
     private static final Provider bcProvider = new BouncyCastleProvider();
 
+    public AndroidCryptoProvider() {
+        certFile = null;
+        keyFile = null;
+    }
+
     public AndroidCryptoProvider(Context c) {
         String dataPath = c.getFilesDir().getAbsolutePath();
 

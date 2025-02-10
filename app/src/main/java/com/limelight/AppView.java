@@ -2,13 +2,32 @@ package com.limelight;
 
 import java.io.IOException;
 import java.io.StringReader;
+import java.math.BigInteger;
+import java.security.InvalidKeyException;
+import java.security.NoSuchAlgorithmException;
+import java.security.NoSuchProviderException;
+import java.security.Principal;
+import java.security.PrivateKey;
+import java.security.PublicKey;
+import java.security.SignatureException;
+import java.security.cert.CertificateEncodingException;
+import java.security.cert.CertificateException;
+import java.security.cert.CertificateExpiredException;
+import java.security.cert.CertificateNotYetValidException;
+import java.security.cert.X509Certificate;
+import java.util.Collections;
+import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
+import com.limelight.binding.PlatformBinding;
 import com.limelight.computers.ComputerManagerListener;
 import com.limelight.computers.ComputerManagerService;
 import com.limelight.grid.AppGridAdapter;
+import com.limelight.nvstream.http.CloudgameService;
 import com.limelight.nvstream.http.ComputerDetails;
+import com.limelight.nvstream.http.LimelightCryptoProvider;
 import com.limelight.nvstream.http.NvApp;
 import com.limelight.nvstream.http.NvHTTP;
 import com.limelight.nvstream.http.PairingManager;
@@ -62,8 +81,10 @@ public class AppView extends Activity implements AdapterFragmentCallbacks {
     private boolean suspendGridUpdates;
     private boolean inForeground;
     private boolean showHiddenApps;
-    private HashSet<Integer> hiddenAppIds = new HashSet<>();
 
+    public String CloudgameJWTToken;
+
+    private HashSet<Integer> hiddenAppIds = new HashSet<>();
     private PreferenceConfiguration prefConfig;
 
     private final static int START_OR_RESUME_ID = 1;
@@ -81,6 +102,7 @@ public class AppView extends Activity implements AdapterFragmentCallbacks {
     public final static String UUID_EXTRA = "UUID";
     public final static String NEW_PAIR_EXTRA = "NewPair";
     public final static String SHOW_HIDDEN_APPS_EXTRA = "ShowHiddenApps";
+    public final static String CLOUDGAME_JWT_TOKEN_EXTRA = "CloudgameJWTToken";
 
     private ComputerManagerService.ComputerManagerBinder managerBinder;
     private final ServiceConnection serviceConnection = new ServiceConnection() {
@@ -217,22 +239,44 @@ public class AppView extends Activity implements AdapterFragmentCallbacks {
                     return;
                 }
 
-                // Close immediately if the PC is no longer paired
-                if (details.state == ComputerDetails.State.ONLINE && details.pairState != PairingManager.PairState.PAIRED) {
-                    AppView.this.runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            // Disable shortcuts referencing this PC for now
-                            shortcutHelper.disableComputerShortcut(details,
-                                    getResources().getString(R.string.scut_not_paired));
+                boolean cloudgameServiceValid = details.HasCloudgameService();
 
-                            // Display a toast to the user and quit the activity
-                            Toast.makeText(AppView.this, getResources().getText(R.string.scut_not_paired), Toast.LENGTH_SHORT).show();
-                            finish();
-                        }
-                    });
+                if (cloudgameServiceValid) {
+                    CloudgameService service = new CloudgameService(details.cloudgameAddress, CloudgameJWTToken);
 
-                    return;
+                    cloudgameServiceValid = service.IsServiceValid();
+
+                    if (!cloudgameServiceValid) {
+                        AppView.this.runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                String errorMessage = "Cloudgame JWTToken is not valid!";
+
+                                shortcutHelper.disableComputerShortcut(details, errorMessage);
+                                Toast.makeText(AppView.this, errorMessage, Toast.LENGTH_SHORT).show();
+
+                                finish();
+                            }
+                        });
+                    }
+                } else {
+                    // Close immediately if the PC is no longer paired
+                    if (details.state == ComputerDetails.State.ONLINE && details.pairState != PairingManager.PairState.PAIRED) {
+                        AppView.this.runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                // Disable shortcuts referencing this PC for now
+                                shortcutHelper.disableComputerShortcut(details,
+                                        getResources().getString(R.string.scut_not_paired));
+
+                                // Display a toast to the user and quit the activity
+                                Toast.makeText(AppView.this, getResources().getText(R.string.scut_not_paired), Toast.LENGTH_SHORT).show();
+                                finish();
+                            }
+                        });
+
+                        return;
+                    }
                 }
 
                 // App list is the same or empty
@@ -308,6 +352,8 @@ public class AppView extends Activity implements AdapterFragmentCallbacks {
 
         showHiddenApps = getIntent().getBooleanExtra(SHOW_HIDDEN_APPS_EXTRA, false);
         uuidString = getIntent().getStringExtra(UUID_EXTRA);
+
+        CloudgameJWTToken = getIntent().getStringExtra(CLOUDGAME_JWT_TOKEN_EXTRA);
 
         SharedPreferences hiddenAppsPrefs = getSharedPreferences(HIDDEN_APPS_PREF_FILENAME, MODE_PRIVATE);
         for (String hiddenAppIdStr : hiddenAppsPrefs.getStringSet(uuidString, new HashSet<String>())) {

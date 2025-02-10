@@ -87,6 +87,8 @@ public class ComputerDetails {
     public boolean vDisplaySupported = false;
     public boolean vDisplayDriverReady = false;
 
+    public String cloudgameJWTToken = "";
+
     // Server commands
     public List<String> serverCommands;
 
@@ -168,6 +170,8 @@ public class ComputerDetails {
         this.vDisplayDriverReady = details.vDisplayDriverReady;
         this.vDisplaySupported = details.vDisplaySupported;
 
+        this.cloudgameJWTToken = details.cloudgameJWTToken;
+
         this.serverCommands = details.serverCommands;
     }
 
@@ -243,6 +247,7 @@ public class ComputerDetails {
                 "Pair State: " + pairState + "\n" +
                 "Running Game ID: " + runningGameId + "\n" +
                 "HTTPS Port: " + httpsPort + "\n" +
-                "Cloudgame Port: " + cloudgamePort + "\n";
+                "Cloudgame Port: " + cloudgamePort + "\n" +
+                "Cloudgame JWTToken: " + cloudgameJWTToken + "\n";
     }
 }

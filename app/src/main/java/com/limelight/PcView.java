@@ -10,6 +10,7 @@ import com.limelight.computers.ComputerManagerListener;
 import com.limelight.computers.ComputerManagerService;
 import com.limelight.grid.PcGridAdapter;
 import com.limelight.grid.assets.DiskAssetLoader;
+import com.limelight.nvstream.http.CloudgameService;
 import com.limelight.nvstream.http.ComputerDetails;
 import com.limelight.nvstream.http.NvApp;
 import com.limelight.nvstream.http.NvHTTP;
@@ -61,6 +62,7 @@ import android.widget.AdapterView.AdapterContextMenuInfo;
 
 import androidx.preference.PreferenceManager;
 
+import org.jcodec.containers.mp4.boxes.Edit;
 import org.xmlpull.v1.XmlPullParserException;
 
 import javax.microedition.khronos.egl.EGLConfig;
@@ -370,7 +372,7 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
 
         // Call superclass
         super.onCreateContextMenu(menu, v, menuInfo);
-                
+
         AdapterContextMenuInfo info = (AdapterContextMenuInfo) menuInfo;
         ComputerObject computer = (ComputerObject) pcGridAdapter.getItem(info.position);
 
@@ -443,6 +445,11 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
         }
         if (managerBinder == null) {
             Toast.makeText(PcView.this, getResources().getString(R.string.error_manager_not_running), Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        if (computer.HasCloudgameService()) {
+            doCloudgameAuthenticationDialog(computer, false, false);
             return;
         }
 
@@ -698,6 +705,56 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
         startActivity(i);
     }
 
+    private void doCloudgameAuthenticationDialog(ComputerDetails computer, boolean newlyPaired, boolean showHiddenGames) {
+        if (computer.state == ComputerDetails.State.OFFLINE) {
+            Toast.makeText(PcView.this, getResources().getString(R.string.error_pc_offline), Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        if (managerBinder == null) {
+            Toast.makeText(PcView.this, getResources().getString(R.string.error_manager_not_running), Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(PcView.this);
+        builder.setTitle("Enter your Cloudgame JWT Token");
+
+        final EditText input = new EditText(PcView.this);
+        input.setInputType(InputType.TYPE_CLASS_TEXT);
+
+        builder.setView(input);
+
+        builder.setPositiveButton("Enter", (dialog, which) -> {
+            String jwtToken = input.getText().toString();
+
+            try {
+                Thread updateThread = new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        CloudgameService service = new CloudgameService(computer.cloudgameAddress, jwtToken);
+                        service.UpdateComputerDetails(computer);
+                    }
+                });
+
+                updateThread.start();
+                updateThread.join();
+            } catch (InterruptedException exception) {}
+
+            Intent i = new Intent(this, AppView.class);
+            i.putExtra(AppView.NAME_EXTRA, computer.name);
+            i.putExtra(AppView.UUID_EXTRA, computer.uuid);
+            i.putExtra(AppView.NEW_PAIR_EXTRA, newlyPaired);
+            i.putExtra(AppView.SHOW_HIDDEN_APPS_EXTRA, showHiddenGames);
+            i.putExtra(AppView.CLOUDGAME_JWT_TOKEN_EXTRA, jwtToken);
+
+            startActivity(i);
+        });
+
+        builder.show();
+
+        //doAppList(computer, false, false);
+    }
+
     @Override
     public boolean onContextItemSelected(MenuItem item) {
         AdapterContextMenuInfo info = (AdapterContextMenuInfo) item.getMenuInfo();
@@ -872,6 +929,11 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
                     // Pair an unpaired machine by default
                     doPair(computer.details, null, null);
                 } else {
+                    if (computer.details.HasCloudgameService()) {
+                        doCloudgameAuthenticationDialog(computer.details, false, false);
+                        return;
+                    }
+
                     doAppList(computer.details, false, false);
                 }
             }

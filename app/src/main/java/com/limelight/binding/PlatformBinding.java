@@ -11,4 +11,8 @@ public class PlatformBinding {
     public static LimelightCryptoProvider getCryptoProvider(Context c) {
         return new AndroidCryptoProvider(c);
     }
+
+    public static LimelightCryptoProvider getDummyProvider() {
+        return new AndroidCryptoProvider();
+    }
 }

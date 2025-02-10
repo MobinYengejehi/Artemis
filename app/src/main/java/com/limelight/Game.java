@@ -24,6 +24,7 @@ import com.limelight.binding.video.PerfOverlayListener;
 import com.limelight.nvstream.NvConnection;
 import com.limelight.nvstream.NvConnectionListener;
 import com.limelight.nvstream.StreamConfiguration;
+import com.limelight.nvstream.http.CloudgameService;
 import com.limelight.nvstream.http.ComputerDetails;
 import com.limelight.nvstream.http.NvApp;
 import com.limelight.nvstream.http.NvHTTP;
@@ -235,6 +236,10 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
     public static final String CLIPBOARD_IDENTIFIER = "ArtemisStreaming";
 
+    public static final String EXTRA_CLOUDGAME_HOST = "CloudgameHost";
+    public static final String EXTRA_CLOUDGAME_PORT = "CloudgamePort";
+    public static final String EXTRA_CLOUDGAME_JWTTOKEN = "CloudgameJWTToken";
+
     private String host;
     private int port;
     private int httpsPort;
@@ -248,7 +253,12 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     private ClipboardManager clipboardManager;
     private boolean clipboardSyncRunning = false;
 
+    private ComputerDetails.AddressTuple cloudgameTuple = null;
+    private String                       cloudgameJWTToken = null;
+
     private NvHTTP httpConn;
+
+    private CloudgameService cloudgameService;
 
     public interface GameMenuCallbacks {
         void showMenu(GameInputDevice devic);
@@ -450,6 +460,17 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             }
         } catch (Exception e) {
             e.printStackTrace();
+        }
+
+        int cloudgamePort = Game.this.getIntent().getIntExtra(EXTRA_CLOUDGAME_PORT, 0);
+
+        if (cloudgamePort != 0) {
+            String cloudgameHost = Game.this.getIntent().getStringExtra(EXTRA_CLOUDGAME_HOST);
+
+            cloudgameTuple = new ComputerDetails.AddressTuple(cloudgameHost, cloudgamePort);
+            cloudgameJWTToken = Game.this.getIntent().getStringExtra(EXTRA_CLOUDGAME_JWTTOKEN);
+
+            cloudgameService = new CloudgameService(cloudgameTuple, cloudgameJWTToken);
         }
 
         if (appId == StreamConfiguration.INVALID_APP_ID) {

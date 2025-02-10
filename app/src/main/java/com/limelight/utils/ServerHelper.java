@@ -70,6 +70,13 @@ public class ServerHelper {
         intent.putExtra(Game.EXTRA_PC_NAME, computer.name);
         intent.putExtra(Game.EXTRA_VDISPLAY, withVDisplay);
         intent.putExtra(Game.EXTRA_SERVER_COMMANDS, (ArrayList<String>) computer.serverCommands);
+
+        if (computer.cloudgameAddress != null) {
+            intent.putExtra(Game.EXTRA_CLOUDGAME_HOST, computer.cloudgameAddress.address);
+            intent.putExtra(Game.EXTRA_CLOUDGAME_PORT, computer.cloudgameAddress.port);
+            intent.putExtra(Game.EXTRA_CLOUDGAME_JWTTOKEN, computer.cloudgameJWTToken);
+        }
+
         try {
             if (computer.serverCert != null) {
                 intent.putExtra(Game.EXTRA_SERVER_CERT, computer.serverCert.getEncoded());
