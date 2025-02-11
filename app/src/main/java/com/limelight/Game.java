@@ -255,6 +255,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
     private ComputerDetails.AddressTuple cloudgameTuple = null;
     private String                       cloudgameJWTToken = null;
+    private boolean                      cloudgameServiceAvailable = false;
 
     private NvHTTP httpConn;
 
@@ -469,6 +470,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
             cloudgameTuple = new ComputerDetails.AddressTuple(cloudgameHost, cloudgamePort);
             cloudgameJWTToken = Game.this.getIntent().getStringExtra(EXTRA_CLOUDGAME_JWTTOKEN);
+            cloudgameServiceAvailable = true;
 
             cloudgameService = new CloudgameService(cloudgameTuple, cloudgameJWTToken);
         }
@@ -649,6 +651,12 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 PlatformBinding.getCryptoProvider(this), serverCert);
         controllerHandler = new ControllerHandler(this, conn, this, prefConfig);
         keyboardTranslator = new KeyboardTranslator(prefConfig);
+
+        if (cloudgameServiceAvailable) {
+            conn.cloudgameServiceAvailable = cloudgameServiceAvailable;
+            conn.cloudgameJWTToken = cloudgameJWTToken;
+            conn.cloudgameTuple = cloudgameTuple;
+        }
 
         InputManager inputManager = (InputManager) getSystemService(Context.INPUT_SERVICE);
         inputManager.registerInputDeviceListener(keyboardTranslator, null);
@@ -1826,9 +1834,16 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     }
 
     public boolean sendClipboard(boolean force) {
-        if (httpConn == null) {
-            LimeLog.warning("httpConn not ready, cannot send clipboard!");
-            return false;
+        if (cloudgameServiceAvailable) {
+            if (cloudgameService == null) {
+                LimeLog.warning("Cloudgame Service is not ready, cannot send clipboard!");
+                return false;
+            }
+        }else {
+            if (httpConn == null) {
+                LimeLog.warning("httpConn not ready, cannot send clipboard!");
+                return false;
+            }
         }
 
         String clipboardText = getClipboardContent(force);
@@ -1836,7 +1851,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             new Thread() {
                 public void run() {
                     try {
-                        if (!httpConn.sendClipboard(clipboardText)) {
+                        if (cloudgameServiceAvailable ? !cloudgameService.SendClipboard(clipboardText) : !httpConn.sendClipboard(clipboardText)) {
                             if (prefConfig.smartClipboardSyncToast) {
                                 Game.this.runOnUiThread(() -> Toast.makeText(Game.this, getString(R.string.clipboard_sync_unsupported), Toast.LENGTH_SHORT).show());
                             }
@@ -1861,9 +1876,15 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     }
 
     public boolean getClipboard(int delay) {
-        if (httpConn == null) {
-            LimeLog.warning("httpConn not ready, cannot get clipboard!");
-            return false;
+        if (cloudgameServiceAvailable) {
+            if (cloudgameService == null) {
+                LimeLog.warning("Cloudgame Service not ready, cannot get clipboard!");
+            }
+        } else {
+            if (httpConn == null) {
+                LimeLog.warning("httpConn not ready, cannot get clipboard!");
+                return false;
+            }
         }
 
         if (delay == 0 && gameMenuCallbacks != null && gameMenuCallbacks.isMenuOpen()) {
@@ -1881,7 +1902,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                     if (delay > 0) {
                         sleep(delay);
                     }
-                    String clipboardContent = httpConn.getClipboard();
+                    String clipboardContent = cloudgameServiceAvailable ? cloudgameService.GetClipboard() : httpConn.getClipboard();
                     ClipData clipData = ClipData.newPlainText(CLIPBOARD_IDENTIFIER, clipboardContent);
 
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -2893,10 +2914,10 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             new Thread() {
                 public void run() {
                     conn.stop();
-                    if (httpConn != null && quitOnStop) {
+                    if ((cloudgameServiceAvailable ? cloudgameService != null : httpConn != null) && quitOnStop) {
                         try {
                             sleep(1000);
-                            httpConn.quitApp();
+                            if (cloudgameServiceAvailable) cloudgameService.QuitApp(); else httpConn.quitApp();
                             Game.this.runOnUiThread(() -> Toast.makeText(Game.this, Game.this.getResources().getString(R.string.applist_quit_success) + " " + appName, Toast.LENGTH_LONG).show());
                         } catch (Exception e) {
                             Game.this.runOnUiThread(() -> Toast.makeText(Game.this, e.getMessage(), Toast.LENGTH_LONG).show());
