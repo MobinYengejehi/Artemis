@@ -2,6 +2,8 @@ package com.limelight.nvstream.http;
 
 import com.limelight.BuildConfig;
 import com.limelight.LimeLog;
+import com.limelight.nvstream.ConnectionContext;
+import com.limelight.nvstream.jni.MoonBridge;
 import com.limelight.utils.DeviceUtils;
 
 import org.xmlpull.v1.XmlPullParser;
@@ -11,6 +13,7 @@ import org.xmlpull.v1.XmlPullParserFactory;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.Reader;
 import java.io.StringReader;
 import java.net.Proxy;
@@ -22,8 +25,10 @@ import java.util.Stack;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
+import kotlinx.coroutines.channels.Send;
 import okhttp3.ConnectionPool;
 import okhttp3.HttpUrl;
+import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -73,8 +78,12 @@ public class CloudgameService {
 
     public void UpdateComputerDetails(ComputerDetails details) {
         try {
-            String serverInfo = GetServerInfo();
+            UpdateComputerDetails(details, GetServerInfo());
+        } catch (IOException exception) { }
+    }
 
+    public void UpdateComputerDetails(ComputerDetails details, String serverInfo) {
+        try {
             details.name = GetXmlString(serverInfo, "hostname", false);
 
             if (details.name == null || details.name.isEmpty()) {
@@ -124,6 +133,146 @@ public class CloudgameService {
 
             details.state = ComputerDetails.State.ONLINE;
         } catch (IOException | XmlPullParserException exception) { }
+    }
+
+    final private static char[] hexArray = "0123456789ABCDEF".toCharArray();
+    private static String BytesToHex(byte[] bytes) {
+        char[] hexChars = new char[bytes.length * 2];
+
+        for ( int j = 0; j < bytes.length; j++ ) {
+            int v = bytes[j] & 0xFF;
+
+            hexChars[j * 2] = hexArray[v >>> 4];
+            hexChars[j * 2 + 1] = hexArray[v & 0x0F];
+        }
+
+        return new String(hexChars);
+    }
+
+    public boolean LaunchApp(ConnectionContext context, String verb, int appId, boolean enableHdr) throws IOException, XmlPullParserException {
+        int fps = context.isNvidiaServerSoftware && context.streamConfig.getLaunchRefreshRate() > 60 ?
+                0 : context.streamConfig.getLaunchRefreshRate();
+
+        boolean enableSops = context.streamConfig.getSops();
+
+        if (context.isNvidiaServerSoftware) {
+            if (
+                context.negotiatedWidth * context.negotiatedHeight > 1280 * 720 &&
+                context.negotiatedWidth * context.negotiatedHeight != 1920 * 1080 &&
+                context.negotiatedWidth * context.negotiatedHeight != 3840 * 2160
+            ) {
+                LimeLog.info("Disabling SOPS due to non-standard resolution: " + context.negotiatedWidth + "x" + context.negotiatedHeight);
+
+                enableSops = false;
+            }
+        }
+
+        String xmlStr = OpenHttpConnectionToString(this.serviceURL, verb,
+                "appid=" + appId +
+                "&mode=" + context.negotiatedWidth + "x" + context.negotiatedHeight + "x" + fps +
+                "&scaleFactor=" + context.streamConfig.getResolutionScaleFactor() +
+                "&additionalStates=1&sops=" + (enableSops ? 1 : 0) +
+                "&rikey=" + BytesToHex(context.riKey.getEncoded()) +
+                "&rikeyid=" + context.riKeyId +
+                (!enableHdr ? "" : "&hdrMode=1&clientHdrCapVersion=0&clientHdrCapSupportedFlagsInUint32=0&clientHdrCapMetaDataId=NV_STATIC_METADATA_TYPE_1&clientHdrCapDisplayData=0x0x0x0x0x0x0x0x0x0x0") +
+                "&virtualDisplay=" + (context.streamConfig.getVirtualDisplay() ? 1 : 0) +
+                "&localAudioPlayMode=" + (context.streamConfig.getPlayLocalAudio() ? 1 : 0) +
+                "&surroundAudioInfo=" + context.streamConfig.getAudioConfiguration().getSurroundAudioInfo() +
+                "&remoteControllersBitmap=" + context.streamConfig.getAttachedGamepadMask() +
+                "&gcmap=" + context.streamConfig.getAttachedGamepadMask() +
+                "&gcpersist=" + (context.streamConfig.getPersistGamepadsAfterDisconnect() ? 1 : 0) +
+                MoonBridge.getLaunchUrlQueryParameters());
+
+        if (
+           (verb.equals("launch") && !GetXmlString(xmlStr, "gamesession", true).equals("0") ||
+           (verb.equals("resume") && !GetXmlString(xmlStr, "resume", true).equals("0")))
+        ) {
+            context.rtspSessionUrl = GetXmlString(xmlStr, "sessionUrl0", false);
+
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    public boolean QuitApp() throws IOException, XmlPullParserException {
+        String xmlStr = OpenHttpConnectionToString(this.serviceURL, "cancel");
+
+        if (GetXmlString(xmlStr, "cancel", true).equals("0")) {
+            return false;
+        }
+
+        if (GetCurrentGame(GetServerInfo()) != 0) {
+            throw new HostHttpResponseException(599, "");
+        }
+
+        return true;
+    }
+
+    public LinkedList<NvApp> GetAppList() throws HostHttpResponseException, IOException, XmlPullParserException {
+        if (verbose) {
+            return GetAppListByReader(new StringReader(GetAppListRaw()));
+        } else {
+            try (final ResponseBody resp = OpenHttpConnection(this.serviceURL, "applist", null, null)) {
+                return GetAppListByReader(new InputStreamReader(resp.byteStream()));
+            }
+        }
+    }
+
+    public NvApp GetAppByName(String appName) throws IOException, XmlPullParserException {
+        LinkedList<NvApp> appList = GetAppList();
+
+        for (NvApp appFromList : appList) {
+            if (appFromList.getAppName().equalsIgnoreCase(appName)) {
+                return appFromList;
+            }
+        }
+
+        return null;
+    }
+
+    public long GetServerCodecModeSupport(String serverInfo) throws XmlPullParserException, IOException {
+        String str = GetXmlString(serverInfo, "ServerCodecModeSupport", false);
+
+        if (str != null) {
+            return Long.parseLong(str);
+        } else {
+            return 0;
+        }
+    }
+
+    public String GetGfeVersion(String serverInfo) throws XmlPullParserException, IOException {
+        return GetXmlString(serverInfo, "GfeVersion", false);
+    }
+
+    public boolean Supports4K(String serverInfo) throws XmlPullParserException, IOException {
+        String gfeVersionStr = GetXmlString(serverInfo, "GfeVersion", false);
+
+        if (gfeVersionStr == null || gfeVersionStr.startsWith("2.")) {
+            return false;
+        }
+
+        return true;
+    }
+
+    public String GetServerVersion(String serverInfo) throws XmlPullParserException, IOException {
+        return GetXmlString(serverInfo, "appversion", true);
+    }
+
+    public String GetClipboard() throws IOException {
+        return OpenHttpConnectionToString(this.serviceURL, "actions/clipboard", "type=text");
+    }
+
+    public boolean SendClipboard(String content) throws IOException {
+        String resp = OpenHttpConnectionToString(this.serviceURL, "actions/clipboard", "type=text", RequestBody.create(content, MediaType.parse("text/plain")));
+
+        try {
+            GetXmlString(resp, "root", true);
+        } catch (XmlPullParserException exception) {
+            return true;
+        }
+
+        return false;
     }
 
     public InputStream GetBoxArt(NvApp app) throws IOException {
