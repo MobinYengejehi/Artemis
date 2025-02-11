@@ -33,6 +33,7 @@ import org.xmlpull.v1.XmlPullParserException;
 import com.limelight.LimeLog;
 import com.limelight.nvstream.av.audio.AudioRenderer;
 import com.limelight.nvstream.av.video.VideoDecoderRenderer;
+import com.limelight.nvstream.http.CloudgameService;
 import com.limelight.nvstream.http.ComputerDetails;
 import com.limelight.nvstream.http.HostHttpResponseException;
 import com.limelight.nvstream.http.LimelightCryptoProvider;
@@ -51,6 +52,11 @@ public class NvConnection {
     private final boolean isMonkey;
     private final Context appContext;
 
+    public String  cloudgameJWTToken;
+    public boolean cloudgameServiceAvailable;
+
+    public ComputerDetails.AddressTuple cloudgameTuple;
+
     public NvConnection(Context appContext, ComputerDetails.AddressTuple host, int httpsPort, String uniqueId, StreamConfiguration config, LimelightCryptoProvider cryptoProvider, X509Certificate serverCert)
     {
         this.appContext = appContext;
@@ -68,6 +74,10 @@ public class NvConnection {
         this.context.riKeyId = generateRiKeyId();
 
         this.isMonkey = ActivityManager.isUserAMonkey();
+
+        this.cloudgameJWTToken = "";
+        this.cloudgameServiceAvailable = false;
+        this.cloudgameTuple = null;
     }
     
     private static SecretKey generateRiAesKey() {
@@ -220,6 +230,106 @@ public class NvConnection {
         // If we can't determine the connection type, let moonlight-common-c decide.
         return StreamConfiguration.STREAM_CFG_AUTO;
     }
+
+    private boolean startAppCloudgameService() throws XmlPullParserException, IOException {
+        CloudgameService service = new CloudgameService(this.cloudgameTuple, this.cloudgameJWTToken);
+
+        String serverInfo = service.GetServerInfo();
+
+        context.serverAppVersion = service.GetServerVersion(serverInfo);
+
+        if (context.serverAppVersion == null) {
+            context.connListener.displayMessage("Server version malformed");
+            return false;
+        }
+
+        ComputerDetails details = new ComputerDetails();
+        service.UpdateComputerDetails(details, serverInfo);
+
+        context.isNvidiaServerSoftware = details.nvidiaServer;
+        context.serverGfeVersion = service.GetGfeVersion(serverInfo);
+        context.serverCodecModeSupport = (int)service.GetServerCodecModeSupport(serverInfo);
+        context.negotiatedHdr = (context.streamConfig.getSupportedVideoFormats() & MoonBridge.VIDEO_FORMAT_MASK_10BIT) != 0;
+
+        if ((context.serverCodecModeSupport & 0x20200) == 0 && context.negotiatedHdr) {
+            context.connListener.displayTransientMessage("Your PC GPU does not support streaming HDR. The stream will be SDR.");
+            context.negotiatedHdr = false;
+        }
+
+        if (
+            (context.streamConfig.getWidth() > 4060 || context.streamConfig.getHeight() > 4060) &&
+            (service.GetServerCodecModeSupport(serverInfo) & 0x200) == 0 &&
+            context.isNvidiaServerSoftware
+        ) {
+            context.connListener.displayMessage("Your host PC does not support streaming at resolutions above 4K.");
+            return false;
+        } else if (
+            (context.streamConfig.getWidth() > 4060 || context.streamConfig.getHeight() > 4060) &&
+            ((context.streamConfig.getSupportedVideoFormats() & ~MoonBridge.VIDEO_FORMAT_MASK_H264) == 0)
+        ) {
+            context.connListener.displayMessage("Your streaming device must support HEVC or AV1 to stream at resolution above 4K.");
+            return false;
+        } else if (context.streamConfig.getHeight() >= 2160 && !service.Supports4K(serverInfo)) {
+            context.connListener.displayTransientMessage("You must update GeForce Experience to stream in 4K. The stream will be 1080p.");
+
+            context.negotiatedWidth = 1920;
+            context.negotiatedHeight = 1080;
+        } else {
+            context.negotiatedWidth = context.streamConfig.getWidth();
+            context.negotiatedHeight = context.streamConfig.getHeight();
+        }
+
+        if (context.streamConfig.getRemote() == StreamConfiguration.STREAM_CFG_AUTO) {
+            context.negotiatedRemoteStreaming = detectServerConnectionType();
+            context.negotiatedPacketSize = context.negotiatedRemoteStreaming == StreamConfiguration.STREAM_CFG_REMOTE ? 1024 : context.streamConfig.getMaxPacketSize();
+        } else {
+            context.negotiatedRemoteStreaming = context.streamConfig.getRemote();
+            context.negotiatedPacketSize = context.streamConfig.getMaxPacketSize();
+        }
+
+        NvApp app = context.streamConfig.getApp();
+
+        if (!app.isInitialized()) {
+            LimeLog.info("Using deprecated app lookup method - Please specify an app ID in your StreamConfiguration instead");
+
+            app = service.GetAppByName(app.getAppName());
+
+            if (app == null) {
+                context.connListener.displayMessage("The app " + app.getAppName() + " is not in GFE app list");
+                return false;
+            }
+        }
+
+        if (service.GetCurrentGame(serverInfo) != 0) {
+            try {
+                if (service.GetCurrentGame(serverInfo) == app.getAppId()) {
+                    if (!service.LaunchApp(context, "resume", app.getAppId(), context.negotiatedHdr)) {
+                        context.connListener.displayMessage("Failed to resume existing session");
+                        return false;
+                    }
+                } else {
+                    return quitAndLaunch(service, context);
+                }
+            } catch (HostHttpResponseException exception) {
+                if (exception.getErrorCode() == 470) {
+                    context.connListener.displayMessage("This session wasn't started by this device, so it cannot be resumed. End streaming on the original device or the PC itself and try again. (Error code: " + exception.getErrorCode() + ")");
+                    return false;
+                } else if (exception.getErrorCode() == 525) {
+                    context.connListener.displayMessage("The application is minimized. Resume it on the PC manually or quit the session and start streaming again.");
+                    return false;
+                } else {
+                    throw exception;
+                }
+            }
+
+            LimeLog.info("Resumed existing game session");
+
+            return true;
+        } else {
+            return launchNotRunningApp(service, context);
+        }
+    }
+
     
     private boolean startApp() throws XmlPullParserException, IOException
     {
@@ -346,6 +456,24 @@ public class NvConnection {
         }
     }
 
+    protected boolean quitAndLaunch(CloudgameService service, ConnectionContext context) throws IOException, XmlPullParserException {
+        try {
+            if (!service.QuitApp()) {
+                context.connListener.displayMessage("Failed to quit previous session! You must quit it manually");
+                return false;
+            }
+        } catch (HostHttpResponseException exception) {
+            if (exception.getErrorCode() == 599) {
+                context.connListener.displayMessage("This session wasn't started by this device, so it cannot be quit. End streaming on the original device or the PC itself. (Error code: " + exception.getErrorCode() + ")");
+                return false;
+            } else {
+                throw exception;
+            }
+        }
+
+        return launchNotRunningApp(service, context);
+    }
+
     protected boolean quitAndLaunch(NvHTTP h, ConnectionContext context) throws IOException,
             XmlPullParserException {
         try {
@@ -366,6 +494,17 @@ public class NvConnection {
         }
 
         return launchNotRunningApp(h, context);
+    }
+
+    private boolean launchNotRunningApp(CloudgameService service, ConnectionContext context) throws IOException, XmlPullParserException {
+        if (!service.LaunchApp(context, "launch", context.streamConfig.getApp().getAppId(), context.negotiatedHdr)) {
+            context.connListener.displayMessage("Failed to launch application");
+            return false;
+        }
+
+        LimeLog.info("Launched new game session");
+
+        return true;
     }
     
     private boolean launchNotRunningApp(NvHTTP h, ConnectionContext context)
@@ -397,7 +536,7 @@ public class NvConnection {
                 do {
                     boolean retry = false;
                     try {
-                        if (!startApp()) {
+                        if (cloudgameServiceAvailable ? !startAppCloudgameService() : !startApp()) {
                             retry = context.connListener.stageFailed(appName, 0, 0);
                             if (!retry) {
                                 return;
