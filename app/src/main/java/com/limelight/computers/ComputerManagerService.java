@@ -886,9 +886,16 @@ public class ComputerManagerService extends Service {
                             NvHTTP http = new NvHTTP(ServerHelper.getCurrentAddressFromComputer(computer), computer.httpsPort, idManager.getUniqueId(),
                                     computer.serverCert, PlatformBinding.getCryptoProvider(ComputerManagerService.this));
 
-                            CloudgameService service = new CloudgameService(computer.cloudgameAddress, computer.cloudgameJWTToken);
+                            // Only construct the cloudgame client when the PC actually has a cloudgame
+                            // endpoint. cloudgameAddress is null for normal PCs and the constructor
+                            // dereferences it, which NPEs on the app list polling thread.
+                            CloudgameService service = null;
+                            boolean hasCloudgameService = computer.HasCloudgameService();
 
-                            boolean hasCloudgameService = computer.HasCloudgameService() && service.IsServiceValid();
+                            if (hasCloudgameService) {
+                                service = new CloudgameService(computer.cloudgameAddress, computer.cloudgameJWTToken);
+                                hasCloudgameService = service.IsServiceValid();
+                            }
 
                             String appList;
                             if (tuple != null) {

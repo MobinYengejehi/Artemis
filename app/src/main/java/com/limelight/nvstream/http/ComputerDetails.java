@@ -176,7 +176,7 @@ public class ComputerDetails {
     }
 
     public boolean HasCloudgameService() {
-        return this.cloudgamePort != 0;
+        return this.cloudgamePort != 0 && this.cloudgameAddress != null;
     }
 
     @NonNull
